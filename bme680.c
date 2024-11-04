@@ -19,7 +19,7 @@ int bme680_detect(i2c_master_bus_handle_t i2c, i2c_master_dev_handle_t* i2cbme){
     .scl_speed_hz = 100000,
   };
   ESP_LOGI(TAG, "successfully detected BME680 at 0x%02x", addr);
-  if((e = i2c_master_bus_add_device(i2c, &devcfg, i2cnau)) != ESP_OK){
+  if((e = i2c_master_bus_add_device(i2c, &devcfg, i2cbme)) != ESP_OK){
     ESP_LOGE(TAG, "error (%s) adding bme680 i2c device", esp_err_to_name(e));
     return -1;
   }
