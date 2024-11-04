@@ -1,0 +1,7 @@
+version: "0.0.1"
+description: "Driver for the BME680 environmental sensor"
+url: https://github.com/dankamongmen/bme680-esp-idf
+license: "Apache-2.0"
+dependencies:
+  idf:
+    version: ">=5.0"
