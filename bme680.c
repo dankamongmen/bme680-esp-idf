@@ -15,7 +15,7 @@ enum {
   BME680_IIR_127 = 7,
 };
 
-enum {
+typedef enum {
   BME680_REG_MEAS_STATUS = 0x1d,
   BME680_REG_PRESSURE_MSB = 0x1f,
   BME680_REG_PRESSURE_LSB = 0x20,
@@ -34,7 +34,7 @@ enum {
   BME680_REG_CONFIG = 0x75,
   BME680_REG_ID = 0xd0,
   BME680_REG_RESET = 0xe0,
-};
+} registers;
 
 static const unsigned TIMEOUT_MS = 1000u; // FIXME why 1s?
 
@@ -56,6 +56,25 @@ int bme680_detect(i2c_master_bus_handle_t i2c, i2c_master_dev_handle_t* i2cbme){
     return -1;
   }
   return 0;
+}
+
+// get the single byte of some register
+static inline int
+bme680_readreg(i2c_master_dev_handle_t i2c, registers reg,
+               const char* regname, uint8_t* val){
+  uint8_t r = reg;
+  esp_err_t e;
+  if((e = i2c_master_transmit_receive(i2c, &r, 1, val, 1, TIMEOUT_MS)) != ESP_OK){
+    ESP_LOGE(TAG, "error (%s) requesting %s via I2C", esp_err_to_name(e), regname);
+    return -1;
+  }
+  ESP_LOGD(TAG, "got %s: 0x%02x", regname, *val);
+  return 0;
+}
+
+static inline int
+bme680_control_measurements(i2c_master_dev_handle_t i2c, uint8_t* val){
+  return bme680_readreg(i2c, BME680_REG_CTRL_MEAS, "CTRLMEAS", val);
 }
 
 static int
@@ -157,6 +176,14 @@ bme680_set_oversampling(i2c_master_dev_handle_t i2c, unsigned temp,
     return -1;
   }
   ESP_LOGI(TAG, "configured measurements with 0x%02x", buf[1]);
+  uint8_t rbuf;
+  if(bme680_control_measurements(i2c, &rbuf)){
+    return -1;
+  }
+  if(((rbuf & 0xe0) != (tbits << 5u)) || ((rbuf & 0x1c) != (pbits << 2u))){
+    ESP_LOGE(TAG, "unexpected ctrl_meas read 0x%02x", rbuf);
+    return -1;
+  }
   // set up osrs_h
   buf[0] = BME680_REG_CTRL_HUM;
   buf[1] = hbits;
@@ -164,6 +191,7 @@ bme680_set_oversampling(i2c_master_dev_handle_t i2c, unsigned temp,
     return -1;
   }
   ESP_LOGI(TAG, "configured humidity with 0x%02x", buf[1]);
+  // FIXME check register
   return 0;
 }
 
