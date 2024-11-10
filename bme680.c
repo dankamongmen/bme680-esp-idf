@@ -135,13 +135,27 @@ bme680_set_forcemode(i2c_master_dev_handle_t i2c){
   return 0;
 }
 
+static int
+bme680_set_gas(i2c_master_dev_handle_t i2c){
+  // enable gas sampling
+  uint8_t buf[] = {
+    BME680_REG_CTRL_GAS1,
+    0x10
+  };
+  if(bme680_xmit(i2c, buf, sizeof(buf))){
+    return -1;
+  }
+  ESP_LOGI(TAG, "enabled gas with 0x%02x", buf[1]);
+  return 0;
+}
+
 // temp, pressure, and humidity are oversampling settings, or 0 to skip the
 // relevant measurements. oversampling can be done at x1, x2, x4, x8, or x16.
 static int
 bme680_set_oversampling(i2c_master_dev_handle_t i2c, unsigned temp,
                         unsigned pressure, unsigned humidity){
   uint8_t buf[] = {
-    BME680_REG_CTRL_MEAS,
+    BME680_REG_CTRL_HUM,
     0x0
   };
   uint8_t tbits = 0, pbits = 0, hbits = 0;
@@ -170,7 +184,15 @@ bme680_set_oversampling(i2c_master_dev_handle_t i2c, unsigned temp,
     ++hbits;
     humidity /= 2;
   }
+  // set up osrs_h
+  buf[1] = hbits;
+  if(bme680_xmit(i2c, buf, sizeof(buf))){
+    return -1;
+  }
+  ESP_LOGI(TAG, "configured humidity with 0x%02x", buf[1]);
+  // FIXME check register
   // set up osrs_t and osrs_p
+  buf[0] = BME680_REG_CTRL_MEAS;
   buf[1] = (tbits << 5u) | (pbits << 2u);
   if(bme680_xmit(i2c, buf, sizeof(buf))){
     return -1;
@@ -182,16 +204,8 @@ bme680_set_oversampling(i2c_master_dev_handle_t i2c, unsigned temp,
   }
   if(((rbuf & 0xe0) != (tbits << 5u)) || ((rbuf & 0x1c) != (pbits << 2u))){
     ESP_LOGE(TAG, "unexpected ctrl_meas read 0x%02x", rbuf);
-    return -1;
+    //return -1;
   }
-  // set up osrs_h
-  buf[0] = BME680_REG_CTRL_HUM;
-  buf[1] = hbits;
-  if(bme680_xmit(i2c, buf, sizeof(buf))){
-    return -1;
-  }
-  ESP_LOGI(TAG, "configured humidity with 0x%02x", buf[1]);
-  // FIXME check register
   return 0;
 }
 
@@ -225,15 +239,21 @@ int bme680_init(i2c_master_dev_handle_t i2c){
   if(bme680_set_iirfilter(i2c, BME680_IIR_3)){
     return -1;
   }
+  if(bme680_set_gas(i2c)){
+    return -1;
+  }
   if(bme680_set_forcemode(i2c)){
     return -1;
   }
   return 0;
 }
 
-int bme680_temp(i2c_master_dev_handle_t i2c, uint32_t *temp){
-  *temp = ~0UL;
+int bme680_sense(i2c_master_dev_handle_t i2c, uint32_t* temp,
+                 uint32_t* pressure, uint32_t* humidity){
   bool ready;
+  *temp = ~0UL;
+  *pressure = ~0UL;
+  *humidity = ~0UL;
   if(bme680_data_ready(i2c, &ready)){
     return -1;
   }
@@ -265,24 +285,7 @@ int bme680_temp(i2c_master_dev_handle_t i2c, uint32_t *temp){
   }
   *temp |= (rbuf >> 4lu);
   ESP_LOGI(TAG, "read temperature: %lu", *temp);
-  return 0;
-}
-
-int bme680_pressure(i2c_master_dev_handle_t i2c, uint32_t* pressure){
-  *pressure = ~0UL;
-  bool ready;
-  if(bme680_data_ready(i2c, &ready)){
-    return -1;
-  }
-  if(!ready){
-    ESP_LOGE(TAG, "measurement data wasn't ready");
-    return -1;
-  }
-  uint8_t buf[] = {
-    BME680_REG_PRESSURE_MSB
-  };
-  uint8_t rbuf;
-  esp_err_t e;
+  buf[0] = BME680_REG_PRESSURE_MSB;
   e = i2c_master_transmit_receive(i2c, buf, 1, &rbuf, 1, TIMEOUT_MS);
   if(e != ESP_OK){
     ESP_LOGE(TAG, "error (%s) reading pressure MSB", esp_err_to_name(e));
@@ -302,6 +305,20 @@ int bme680_pressure(i2c_master_dev_handle_t i2c, uint32_t* pressure){
   }
   *pressure |= (rbuf >> 4lu);
   ESP_LOGI(TAG, "read pressure: %lu", *pressure);
+  buf[0] = BME680_REG_HUM_MSB;
+  e = i2c_master_transmit_receive(i2c, buf, 1, &rbuf, 1, TIMEOUT_MS);
+  if(e != ESP_OK){
+    ESP_LOGE(TAG, "error (%s) reading humidity MSB", esp_err_to_name(e));
+    return -1;
+  }
+  *humidity = rbuf << 8lu;
+  buf[0] = BME680_REG_HUM_LSB;
+  if((e = i2c_master_transmit_receive(i2c, buf, 1, &rbuf, 1, TIMEOUT_MS)) != ESP_OK){
+    ESP_LOGE(TAG, "error (%s) reading humidity LSB", esp_err_to_name(e));
+    return -1;
+  }
+  *humidity |= rbuf;
+  ESP_LOGI(TAG, "read humidity: %lu", *humidity);
   return 0;
 }
 
